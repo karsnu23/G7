@@ -1,25 +1,25 @@
 #!/bin/bash
-# Render start — FIXED.PY auto-locate (repo me kahin bhi ho, pakad lega)
+# Render start — FIXED.PY auto-locate + lower-ext copy (import-safe)
 pip install -U pip setuptools wheel >/dev/null 2>&1
 pip install -r requirements.txt
 
-# FIXED.PY dhundo (repo-root ya kisi bhi subfolder me):
-FIXED_PATH=$(find /opt/render/project/src -maxdepth 3 -name "FIXED.PY" 2>/dev/null | head -1)
-if [ -z "$FIXED_PATH" ]; then
-  FIXED_PATH=$(find /opt/render/project/src -maxdepth 3 -iname "fixed.py" 2>/dev/null | head -1)
-fi
+# FIXED.PY dhundo (case-insensitive, kahin bhi ho):
+FIXED_PATH=$(find /opt/render/project/src -maxdepth 3 \( -iname "FIXED.PY" -o -iname "fixed.py" \) 2>/dev/null | head -1)
 
 if [ -z "$FIXED_PATH" ]; then
-  echo "!!! FIXED.PY repo me NAHI mila — upload karo repo-ROOT me !!!"
+  echo "!!! FIXED.PY repo me NAHI mila — upload karo !!!"
   exit 1
 fi
 
-APP_DIR=$(dirname "$FIXED_PATH")
-echo ">>> FIXED.PY found at: $FIXED_PATH"
-echo ">>> cd $APP_DIR"
-cd "$APP_DIR"
+echo ">>> found: $FIXED_PATH"
 
-python -m gunicorn FIXED:app -k uvicorn.workers.UvicornWorker \
+# COPY to working-dir with lowercase .py ext (import-safe — .PY uppercase ext
+# python3.14 standard-import me nahi jata):
+cp "$FIXED_PATH" /opt/render/project/src/fixed_app.py
+cd /opt/render/project/src
+
+echo ">>> launching gunicorn fixed_app:app"
+python -m gunicorn fixed_app:app -k uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:$PORT \
   --workers 8 \
   --worker-connections 2000 \
