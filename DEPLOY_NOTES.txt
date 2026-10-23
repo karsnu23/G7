@@ -1,0 +1,53 @@
+FIXED.PY — Render Deployment
+============================
+
+FILES NEEDED IN REPO (root):
+  FIXED.PY
+  requirements.txt
+  start.sh          (from below)
+
+STEP 1 — requirements.txt must contain:
+  fastapi==0.141.1
+  uvicorn==0.52.1
+  gunicorn==23.0.0
+  pydantic==2.13.4
+  aiohttp==3.14.3
+  curl_cffi==0.16.3
+
+STEP 2 — start.sh (create in repo root):
+  #!/bin/bash
+  pip install -U pip setuptools wheel >/dev/null
+  pip install -r requirements.txt
+  python -m gunicorn FIXED:app -k uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:$PORT \
+    --workers 8 \
+    --worker-connections 2000 \
+    --timeout 180 \
+    --graceful-timeout 160 \
+    --keep-alive 30 \
+    --max-requests 8000 \
+    --max-requests-jitter 800 \
+    --preload \
+    --access-logfile - \
+    --error-logfile -
+
+STEP 3 — Render Dashboard:
+  Start Command:  bash start.sh
+  (ya Build Command: pip install -r requirements.txt
+   + Start Command: bash start.sh)
+
+WHY gunicorn: command not found aa raha tha:
+  Render ka python-environment me gunicorn installed hi nahi hai
+  (requirements.txt me tha hi nahi / ya pip install nahi hua).
+  start.sh dono fix karta — install + python -m gunicorn (PATH-safe).
+
+HEALTH:
+  GET /health → {"status":"healthy"}
+  GET /status → workers + endpoints
+  GET /SHOPII?site=<url>&cc=<num|mm|yy|cvv>&proxy=<ip:port:user:pass>
+
+NOTE (batch flood):
+  Render free/standard instances pe long-poll 90s+ ho to Render
+  request-idle-timeout (default 100s) hit ho sakta — mas-checks ke
+  liye timeout 180 rakha hai magar Render plan ka timeout bhi 300+
+  hona chahiye (Standard pe 300s hota by default).
