@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: shopi-api-v2
+    runtime: sh
+    plan: starter
+    buildCommand: ./build.sh
+    startCommand: ./render_start.sh
+    envVars:
+      - key: PORT
+        value: 10000
